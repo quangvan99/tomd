@@ -11,8 +11,11 @@ from transformers import AutoConfig, AutoModel, AutoModelForCausalLM, AutoTokeni
 from transformers import VisionEncoderDecoderConfig, VisionEncoderDecoderModel
 from transformers.models.vision_encoder_decoder.modeling_vision_encoder_decoder import logger as base_model_logger
 
-from .unimer_swin import UnimerSwinConfig, UnimerSwinModel, UnimerSwinImageProcessor
-from .unimer_mbart import UnimerMBartConfig, UnimerMBartForCausalLM
+from .unimer_swin.configuration_unimer_swin import UnimerSwinConfig
+from .unimer_swin.modeling_unimer_swin import UnimerSwinModel
+from .unimer_swin.image_processing_unimer_swin import UnimerSwinImageProcessor
+from .unimer_mbart.configuration_unimer_mbart import UnimerMBartConfig
+from .unimer_mbart.modeling_unimer_mbart import UnimerMBartForCausalLM
 from ...utils import latex_rm_whitespace
 
 AutoConfig.register(UnimerSwinConfig.model_type, UnimerSwinConfig)

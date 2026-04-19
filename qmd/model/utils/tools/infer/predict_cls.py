@@ -7,7 +7,7 @@ import time
 import torch
 from ...pytorchocr.base_ocr_v20 import BaseOCRV20
 from . import pytorchocr_utility as utility
-from ...pytorchocr.postprocess import build_post_process
+from ...pytorchocr.postprocess.build import build_post_process
 
 
 class TextClassifier(BaseOCRV20):

@@ -6,8 +6,8 @@ import time
 import torch
 from ...pytorchocr.base_ocr_v20 import BaseOCRV20
 from . import pytorchocr_utility as utility
-from ...pytorchocr.data import create_operators, transform
-from ...pytorchocr.postprocess import build_post_process
+from ...pytorchocr.data.imaug.factory import create_operators, transform
+from ...pytorchocr.postprocess.build import build_post_process
 
 
 class TextDetector(BaseOCRV20):

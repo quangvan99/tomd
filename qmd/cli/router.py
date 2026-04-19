@@ -47,7 +47,7 @@ from qmd.cli.public_http_client_policy import (
     warn_if_public_http_client_policy as _warn_if_public_http_client_policy,
 )
 from qmd.cli.vlm_preload import build_local_api_cli_args
-from qmd.version import __version__
+__version__ = "3.1.0"
 
 TASK_PENDING = "pending"
 TASK_PROCESSING = "processing"

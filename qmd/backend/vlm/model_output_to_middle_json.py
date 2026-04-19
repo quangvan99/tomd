@@ -19,7 +19,7 @@ from qmd.utils.cut_image import cut_image_and_table
 from qmd.utils.enum_class import ContentType
 from qmd.utils.hash_utils import bytes_md5
 from qmd.utils.pdfium_guard import close_pdfium_document, pdfium_guard
-from qmd.version import __version__
+__version__ = "3.1.0"
 
 
 heading_level_import_success = False

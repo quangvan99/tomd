@@ -25,7 +25,7 @@ class MathDataset(Dataset):
 
 class UnimernetModel(object):
     def __init__(self, weight_dir, _device_="cpu"):
-        from .unimernet_hf import UnimernetModel
+        from .unimernet_hf.modeling_unimernet import UnimernetModel
 
         if _device_.startswith("mps") or _device_.startswith("npu") or _device_.startswith("musa"):
             self.model = UnimernetModel.from_pretrained(

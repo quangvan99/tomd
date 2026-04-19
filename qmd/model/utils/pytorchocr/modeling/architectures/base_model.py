@@ -1,9 +1,9 @@
 # Copyright (c) Opendatalab. All rights reserved.
 from torch import nn
 
-from ..backbones import build_backbone
-from ..heads import build_head
-from ..necks import build_neck
+from ..backbones.build import build_backbone
+from ..heads.build import build_head
+from ..necks.build import build_neck
 
 
 class BaseModel(nn.Module):

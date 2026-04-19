@@ -28,7 +28,7 @@ from qmd.utils.pdfium_guard import (
     open_pdfium_document,
 )
 
-from qmd.version import __version__
+__version__ = "3.1.0"
 from qmd.cli.common import (
     HybridDependencyError,
     ensure_backend_dependencies,

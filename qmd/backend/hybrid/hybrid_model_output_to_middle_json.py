@@ -28,7 +28,7 @@ from qmd.utils.enum_class import ContentType
 from qmd.utils.hash_utils import bytes_md5
 from qmd.utils.ocr_utils import OcrConfidence, rotate_vertical_crop_if_needed
 from qmd.utils.pdfium_guard import close_pdfium_document, pdfium_guard
-from qmd.version import __version__
+__version__ = "3.1.0"
 
 from qmd.utils.llm_aided import llm_aided_title
 title_aided_enable = False
