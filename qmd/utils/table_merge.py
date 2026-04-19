@@ -5,7 +5,7 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from qmd.backend.vlm.vlm_middle_json_mkcontent import merge_para_with_text
+from qmd.backend.pipeline.pipeline_middle_json_mkcontent import merge_para_with_text
 from qmd.utils.char_utils import full_to_half
 from qmd.utils.enum_class import BlockType, SplitFlag
 

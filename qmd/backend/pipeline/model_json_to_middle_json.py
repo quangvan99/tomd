@@ -14,7 +14,10 @@ from qmd.backend.pipeline.para_split import para_split
 from qmd.utils.char_utils import full_to_half
 from qmd.utils.cut_image import cut_image_and_table
 from qmd.utils.enum_class import ContentType, BlockType
-from qmd.utils.llm_aided import llm_aided_title
+try:
+    from qmd.utils.llm_aided import llm_aided_title
+except ImportError:
+    llm_aided_title = None
 from qmd.utils.model_utils import clean_memory
 from qmd.backend.pipeline.pipeline_magic_model import MagicModel
 from qmd.utils.ocr_utils import OcrConfidence, rotate_vertical_crop_if_needed
@@ -272,7 +275,7 @@ def finalize_middle_json(pdf_info_list, lang=None, ocr_enable=False):
     llm_aided_config = get_llm_aided_config()
     if llm_aided_config is not None:
         title_aided_config = llm_aided_config.get('title_aided', None)
-        if title_aided_config is not None and title_aided_config.get('enable', False):
+        if title_aided_config is not None and title_aided_config.get('enable', False) and llm_aided_title is not None:
             llm_aided_title_start_time = time.time()
             llm_aided_title(pdf_info_list, title_aided_config)
             logger.info(f'llm aided title time: {round(time.time() - llm_aided_title_start_time, 2)}')
