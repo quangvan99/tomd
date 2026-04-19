@@ -1,10 +1,13 @@
 """
-MinerU pipeline - unboxed.
+MinerU pipeline - fully self-contained, no installed mineru package needed.
+
+All source code lives in ./mineru/  (copied from mineru site-packages)
+All model weights live in ./models/ (copied from HuggingFace cache)
 
 Steps:
   1. Load PDF bytes
   2. Classify: text-based or OCR
-  3. Load all models (layout, OCR, formula, table)
+  3. Load all models (layout, OCR, formula, table) from ./models/
   4. Render pages to PIL images
   5. Run batch inference (layout detection + OCR + formula + table)
   6. Build middle JSON (structured page blocks)
@@ -18,7 +21,10 @@ Usage:
 
 import sys
 import os
-from pathlib import Path
+
+# Use local mineru/ source, not the installed package
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
 
 import pypdfium2 as pdfium
 
@@ -44,8 +50,8 @@ from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make
 
 # ── Step 1: Load PDF ──────────────────────────────────────────────────────────
 
-def load_pdf(pdf_path: Path) -> bytes:
-    return pdf_path.read_bytes()
+def load_pdf(pdf_path) -> bytes:
+    return open(pdf_path, "rb").read()
 
 
 # ── Step 2: Classify ──────────────────────────────────────────────────────────
@@ -65,32 +71,32 @@ def get_ocr_enable(pdf_bytes: bytes, parse_method: str = "auto") -> bool:
 
 def load_models(lang: str = "en", formula_enable: bool = True, table_enable: bool = True):
     """
-    Returns the shared MineruPipelineModel singleton.
+    Load all models from ./models/ (no download).
+
     Models loaded:
-      - PPDocLayoutV2LayoutModel  (layout detection)
-      - UnimernetModel            (formula recognition)
-      - PytorchPaddleOCR          (text OCR det + rec)
-      - PaddleTableClsModel       (table classification: wired vs wireless)
-      - UnetTableModel            (wired table → HTML)
-      - PaddleTableModel          (wireless table → HTML)
+      - PPDocLayoutV2LayoutModel    models/Layout/PP-DocLayoutV2/
+      - UnimernetModel              models/MFR/unimernet_hf_small_2503/
+      - PytorchPaddleOCR            models/OCR/paddleocr_torch/
+      - PaddleTableClsModel         models/TabCls/paddle_table_cls/*.onnx
+      - UnetTableModel              models/TabRec/UnetStructure/unet.onnx
+      - PaddleTableModel            models/TabRec/SlanetPlus/slanet-plus.onnx
     """
     model_manager = ModelSingleton()
-    model = model_manager.get_model(
+    model_manager.get_model(
         lang=lang,
         formula_enable=formula_enable,
         table_enable=table_enable,
     )
-    return model_manager, model
+    return model_manager
 
 
 # ── Step 4: Render pages ──────────────────────────────────────────────────────
 
 def render_pages(pdf_bytes: bytes, start_page: int = 0, end_page: int = None):
     """
-    Open PDF with pypdfium2 and render pages to PIL images.
-    Returns (pdf_doc, images_list) where each image_dict has:
-      - img_pil: PIL.Image (RGB)
-      - scale: float (72dpi → 144dpi = 2.0)
+    Open PDF with pypdfium2 and render all pages to PIL images (144 DPI).
+    Returns (pdf_doc, images_list, page_count).
+    Each entry in images_list: {"img_pil": PIL.Image, "scale": float}
     """
     pdf_doc = open_pdfium_document(pdfium.PdfDocument, pdf_bytes)
     page_count = get_pdfium_document_page_count(pdf_doc)
@@ -116,15 +122,17 @@ def run_batch_inference(
     table_enable: bool = True,
 ) -> list:
     """
-    Run all models on a batch of page images.
-    Returns a list (one per page) of layout detection results.
-    Each result is a list of dicts: {bbox, label, score, latex/html/text, ...}
+    Run all models on all page images in one batch.
 
-    Models invoked (in order per page):
-      1. Layout detection    → bounding boxes + labels
-      2. Formula recognition → latex string for each formula bbox
-      3. Table classification + OCR → HTML for each table bbox
-      4. Text OCR detection + recognition → text for each text region
+    Order of operations per page:
+      1. Layout detection      → bboxes + labels (text/table/image/formula/...)
+      2. Formula recognition   → LaTeX string for each formula bbox
+      3. Table classification  → wired vs wireless
+      4. Table OCR + structure → HTML per table
+      5. Text OCR det + rec    → text content per text region
+
+    Returns list (one per page) of layout detection dicts:
+      {bbox, label, score, latex (formulas), html (tables), text (OCR), ...}
     """
     images_with_extra_info = [
         (image_dict["img_pil"], ocr_enable, lang)
@@ -149,13 +157,15 @@ def build_middle_json(
     ocr_enable: bool = False,
 ) -> dict:
     """
-    Convert raw model outputs into structured page blocks (middle JSON).
-    Each page gets:
-      - preproc_blocks: list of content blocks (text, title, table, image, equation, ...)
-      - discarded_blocks: headers, footers, footnotes
-      - page_idx, page_size
+    Convert raw model outputs to structured block tree (middle JSON).
 
-    Also cuts and saves image/table/formula crops to image_writer.
+    For each page builds:
+      preproc_blocks: [
+        {type, bbox, lines: [{bbox, spans: [{type, content, score, image_path, bbox}]}]}
+      ]
+      discarded_blocks: headers, footers, footnotes
+
+    Also crops and saves image/table/formula regions to image_writer.
     """
     middle_json = init_middle_json()
     append_batch_results_to_middle_json(
@@ -174,12 +184,11 @@ def build_middle_json(
 
 def finalize(middle_json: dict, lang: str, ocr_enable: bool):
     """
-    Document-level post-processing:
-      - Post-OCR recognition for remaining image crops
-      - Formula number tags (e.g., \\tag{(1)})
-      - Paragraph splitting (group lines into paragraphs)
+    Document-level post-processing (modifies middle_json in place):
+      - Post-OCR recognition for any remaining np_img crops
+      - Formula number tags: attach \\tag{(n)} to adjacent equations
+      - Paragraph splitting: merge lines into reading-order paragraphs
       - Cross-page table merging
-    Modifies middle_json["pdf_info"] in place.
     """
     finalize_middle_json(middle_json["pdf_info"], lang=lang, ocr_enable=ocr_enable)
 
@@ -188,47 +197,53 @@ def finalize(middle_json: dict, lang: str, ocr_enable: bool):
 
 def generate_markdown(middle_json: dict, image_dir_name: str = "images") -> str:
     """
-    Convert structured page blocks into markdown text.
-    Block type → markdown:
-      TEXT / ABSTRACT / LIST  →  paragraph
-      TITLE (level 1/2/3)     →  # / ## / ###
-      INTERLINE_EQUATION       →  $$latex$$
-      INLINE_EQUATION          →  $latex$
-      TABLE                    →  HTML table
-      IMAGE / CHART            →  ![](image_path)
-      CODE                     →  ```code```
+    Walk the block tree and emit markdown.
+
+    Block type → markdown output:
+      TEXT / ABSTRACT / LIST       → plain paragraph
+      TITLE level 1/2/3+           → # / ## / ###
+      INTERLINE_EQUATION            → $$latex$$
+      INLINE_EQUATION               → $latex$
+      TABLE                         → <html table>
+      IMAGE / CHART                 → ![](images/xxx.jpg)
+      CODE                          → ```...```
     """
     return union_make(middle_json["pdf_info"], MakeMode.MM_MD, image_dir_name)
 
 
 # ── Step 9: Write output ──────────────────────────────────────────────────────
 
-def write_output(markdown: str, stem: str, output_dir: Path):
-    """Write markdown file. Images were already written by image_writer during step 6."""
-    md_dir = output_dir / stem / "auto"
+def write_output(markdown: str, stem: str, output_dir) -> str:
+    """Write .md file. Images already written by image_writer in step 6."""
+    from pathlib import Path
+    md_dir = Path(output_dir) / stem / "auto"
     md_dir.mkdir(parents=True, exist_ok=True)
     md_file = md_dir / f"{stem}.md"
     md_file.write_text(markdown, encoding="utf-8")
-    return md_file
+    return str(md_file)
 
 
 # ── Full pipeline ─────────────────────────────────────────────────────────────
 
-def convert(pdf_path: Path, output_dir: Path, lang: str = "en", parse_method: str = "auto"):
+def convert(pdf_path: str, output_dir: str, lang: str = "en", parse_method: str = "auto"):
+    from pathlib import Path
+    pdf_path = Path(pdf_path)
+    output_dir = Path(output_dir)
     stem = pdf_path.stem
+
     image_dir = output_dir / stem / "auto" / "images"
     image_dir.mkdir(parents=True, exist_ok=True)
     image_writer = FileBasedDataWriter(str(image_dir))
 
-    print(f"[1/7] Loading PDF: {pdf_path.name}")
+    print(f"[1/7] Loading PDF:          {pdf_path.name}")
     pdf_bytes = load_pdf(pdf_path)
 
     print(f"[2/7] Classifying PDF...")
     ocr_enable = get_ocr_enable(pdf_bytes, parse_method)
-    print(f"       → OCR mode: {ocr_enable}")
+    print(f"       → ocr_enable={ocr_enable}")
 
-    print(f"[3/7] Loading models (lang={lang})...")
-    model_manager, _ = load_models(lang=lang, formula_enable=True, table_enable=True)
+    print(f"[3/7] Loading models (lang={lang}, models_root=./models/)...")
+    load_models(lang=lang, formula_enable=True, table_enable=True)
 
     print(f"[4/7] Rendering pages...")
     pdf_doc, images_list, page_count = render_pages(pdf_bytes)
@@ -246,12 +261,12 @@ def convert(pdf_path: Path, output_dir: Path, lang: str = "en", parse_method: st
     close_pdfium_document(pdf_doc)
     clean_memory(get_device())
 
-    print(f"[7/7] Finalizing and generating markdown...")
+    print(f"[7/7] Finalizing + generating markdown...")
     finalize(middle_json, lang=lang, ocr_enable=ocr_enable)
     markdown = generate_markdown(middle_json, image_dir_name="images")
 
     md_file = write_output(markdown, stem, output_dir)
-    print(f"[OK]  {pdf_path.name} → {md_file}")
+    print(f"[OK]  → {md_file}")
     return md_file
 
 
@@ -263,20 +278,15 @@ def main():
         print(__doc__)
         sys.exit(1)
 
+    from pathlib import Path
     input_path = Path(args[0])
     output_dir = Path(args[1]) if len(args) > 1 else input_path.parent
 
-    if input_path.is_dir():
-        pdfs = sorted(input_path.glob("*.pdf"))
-    elif input_path.is_file():
-        pdfs = [input_path]
-    else:
-        print(f"Error: {input_path} does not exist")
-        sys.exit(1)
-
+    pdfs = sorted(input_path.glob("*.pdf")) if input_path.is_dir() else [input_path]
     output_dir.mkdir(parents=True, exist_ok=True)
+
     for pdf in pdfs:
-        convert(pdf, output_dir)
+        convert(str(pdf), str(output_dir))
 
 
 if __name__ == "__main__":
