@@ -1,6 +1,7 @@
 import sys
 import os
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
@@ -35,14 +36,23 @@ def convert(pdf_path: str, output_dir: str, lang: str = "en", parse_method: str 
     else:
         ocr_enable = parse_method == "ocr"
 
-    ModelSingleton().get_model(lang=lang, formula_enable=True, table_enable=True)
+    def _load_model():
+        return ModelSingleton().get_model(lang=lang, formula_enable=True, table_enable=True)
 
-    pdf_doc = open_pdfium_document(pdfium.PdfDocument, pdf_bytes)
-    page_count = get_pdfium_document_page_count(pdf_doc)
-    images_list = load_images_from_pdf_doc(
-        pdf_doc, start_page_id=0, end_page_id=page_count - 1,
-        image_type=ImageType.PIL, pdf_bytes=pdf_bytes,
-    )
+    def _render_pdf():
+        pdf_doc = open_pdfium_document(pdfium.PdfDocument, pdf_bytes)
+        page_count = get_pdfium_document_page_count(pdf_doc)
+        images_list = load_images_from_pdf_doc(
+            pdf_doc, start_page_id=0, end_page_id=page_count - 1,
+            image_type=ImageType.PIL, pdf_bytes=pdf_bytes,
+        )
+        return pdf_doc, images_list
+
+    with ThreadPoolExecutor(max_workers=2) as _executor:
+        _model_future = _executor.submit(_load_model)
+        _pdf_future = _executor.submit(_render_pdf)
+        _model_future.result()
+        pdf_doc, images_list = _pdf_future.result()
 
     batch_results = batch_image_analyze(
         [(img["img_pil"], ocr_enable, lang) for img in images_list],

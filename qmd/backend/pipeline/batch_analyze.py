@@ -445,7 +445,7 @@ class BatchAnalyze:
                     f"Table classification failed: {e}, using default model"
                 )
 
-            # OCR det 过程，顺序执行
+            # OCR det - batch processing grouped by resolution
             rec_img_lang_group = defaultdict(list)
             det_ocr_engine = atom_model_manager.get_atom_model(
                 atom_model_name=AtomicModel.OCR,
@@ -453,9 +453,10 @@ class BatchAnalyze:
                 det_db_unclip_ratio=1.6,
                 enable_merge_det_boxes=False,
             )
-            for index, table_res_dict in enumerate(
-                    tqdm(table_res_list_all_page, desc="Table-ocr det")
-            ):
+
+            # Pre-compute det images for all tables
+            table_det_data = []
+            for index, table_res_dict in enumerate(table_res_list_all_page):
                 bgr_image = cv2.cvtColor(table_res_dict["table_img"], cv2.COLOR_RGB2BGR)
                 table_inline_objects = (
                     table_res_dict.get("table_inline_objects", [])
@@ -463,35 +464,60 @@ class BatchAnalyze:
                     else []
                 )
                 inline_mask_boxes = [
-                    {"bbox": inline_object["table_rel_mask_bbox"]}
-                    for inline_object in table_inline_objects
+                    {"bbox": obj["table_rel_mask_bbox"]} for obj in table_inline_objects
                 ]
                 formula_mask_boxes = [
-                    {"bbox": inline_object["table_rel_mask_bbox"]}
-                    for inline_object in table_inline_objects
-                    if inline_object["kind"] == "formula"
+                    {"bbox": obj["table_rel_mask_bbox"]}
+                    for obj in table_inline_objects
+                    if obj["kind"] == "formula"
                 ]
                 det_image = (
                     self._apply_mask_boxes_to_image(bgr_image, inline_mask_boxes)
                     if inline_mask_boxes
                     else bgr_image
                 )
-                ocr_result = det_ocr_engine.ocr(det_image, rec=False)[0]
-                if ocr_result and formula_mask_boxes:
-                    ocr_result = update_det_boxes(ocr_result, formula_mask_boxes)
-                if ocr_result:
-                    ocr_result = sorted_boxes(ocr_result)
-                # 构造需要 OCR 识别的图片字典，包括cropped_img, dt_box, table_id，并按照语言进行分组
-                for dt_box in ocr_result:
-                    rec_img_lang_group[table_res_dict["lang"]].append(
-                        {
-                            "cropped_img": get_rotate_crop_image_for_text_rec(
-                                bgr_image, np.asarray(dt_box, dtype=np.float32)
-                            ),
-                            "dt_box": np.asarray(dt_box, dtype=np.float32),
-                            "table_id": index,
-                        }
-                    )
+                table_det_data.append(
+                    (index, bgr_image, det_image, formula_mask_boxes, table_res_dict["lang"])
+                )
+
+            # Group by resolution for batched detection
+            RESOLUTION_GROUP_STRIDE = 64
+            res_groups = defaultdict(list)
+            for item in table_det_data:
+                h, w = item[2].shape[:2]
+                target_h = ((h + RESOLUTION_GROUP_STRIDE - 1) // RESOLUTION_GROUP_STRIDE) * RESOLUTION_GROUP_STRIDE
+                target_w = ((w + RESOLUTION_GROUP_STRIDE - 1) // RESOLUTION_GROUP_STRIDE) * RESOLUTION_GROUP_STRIDE
+                res_groups[(target_h, target_w)].append(item)
+
+            for (target_h, target_w), group_items in tqdm(res_groups.items(), desc="Table-ocr det"):
+                batch_det_images = []
+                for item in group_items:
+                    img = item[2]
+                    h, w = img.shape[:2]
+                    padded = np.ones((target_h, target_w, 3), dtype=np.uint8) * 255
+                    padded[:h, :w] = img
+                    batch_det_images.append(padded)
+
+                batch_size = min(len(batch_det_images), self.batch_ratio * OCR_DET_BASE_BATCH_SIZE)
+                batch_results = det_ocr_engine.text_detector.batch_predict(batch_det_images, batch_size)
+
+                for item, (dt_boxes, _) in zip(group_items, batch_results):
+                    index, bgr_image, _, formula_mask_boxes, item_lang = item
+                    ocr_result = list(dt_boxes) if dt_boxes is not None else []
+                    if ocr_result and formula_mask_boxes:
+                        ocr_result = update_det_boxes(ocr_result, formula_mask_boxes)
+                    if ocr_result:
+                        ocr_result = sorted_boxes(ocr_result)
+                    for dt_box in ocr_result:
+                        rec_img_lang_group[item_lang].append(
+                            {
+                                "cropped_img": get_rotate_crop_image_for_text_rec(
+                                    bgr_image, np.asarray(dt_box, dtype=np.float32)
+                                ),
+                                "dt_box": np.asarray(dt_box, dtype=np.float32),
+                                "table_id": index,
+                            }
+                        )
 
             # OCR rec，按照语言分批处理
             for _lang, rec_img_list in rec_img_lang_group.items():
@@ -555,21 +581,23 @@ class BatchAnalyze:
                 del table_res_dict["table_res"]["cls_label"]
                 del table_res_dict["table_res"]["cls_score"]
             if wired_table_res_list:
-                for table_res_dict in tqdm(
-                        wired_table_res_list, desc="Table-wired Predict"
-                ):
-                    if not table_res_dict.get("ocr_result", None):
-                        continue
+                # Group by language so the model is retrieved once per language
+                wired_lang_groups = defaultdict(list)
+                for table_res_dict in wired_table_res_list:
+                    if table_res_dict.get("ocr_result"):
+                        wired_lang_groups[table_res_dict["lang"]].append(table_res_dict)
 
+                for lang, lang_group in wired_lang_groups.items():
                     wired_table_model = atom_model_manager.get_atom_model(
                         atom_model_name=AtomicModel.WiredTable,
-                        lang=table_res_dict["lang"],
+                        lang=lang,
                     )
-                    table_res_dict["table_res"]["html"] = wired_table_model.predict(
-                        table_res_dict["wired_table_img"],
-                        table_res_dict["ocr_result"],
-                        table_res_dict["table_res"].get("html", None)
-                    )
+                    for table_res_dict in tqdm(lang_group, desc=f"Table-wired Predict ({lang})"):
+                        table_res_dict["table_res"]["html"] = wired_table_model.predict(
+                            table_res_dict["wired_table_img"],
+                            table_res_dict["ocr_result"],
+                            table_res_dict["table_res"].get("html", None)
+                        )
 
             # 表格格式清理
             for table_res_dict in table_res_list_all_page:
