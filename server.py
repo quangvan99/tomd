@@ -28,7 +28,15 @@ app = FastAPI()
 
 @app.on_event("startup")
 def load_models():
+    from PIL import Image
+    ModelSingleton().get_model(lang=None, formula_enable=True, table_enable=True)
     ModelSingleton().get_model(lang="en", formula_enable=True, table_enable=True)
+    warmup_img = Image.new("RGB", (1024, 1024), (255, 255, 255))
+    batch_image_analyze(
+        [(warmup_img, False, "en"), (warmup_img, True, "en")],
+        formula_enable=True, table_enable=True,
+    )
+    clean_memory(get_device())
 
 
 class ConvertRequest(BaseModel):
