@@ -46,13 +46,14 @@ curl http://localhost:9000/health
 **Convert:**
 
 ```bash
-curl -X POST http://localhost:9000/convert \
+curl -X POST http://localhost:9000/ \
   -H "Content-Type: application/json" \
-  -d '{"url": "raw/PMC6375377.pdf"}'
+  -d '{"url": "raw/PMC6375377.pdf", "format": "md"}'
 ```
 
 - **Input (JSON body)**:
   - `url` (required): local path (relative tới repo) hoặc URL tới file PDF.
+  - `format` (optional, default `"md"`): hiện chỉ hỗ trợ `"md"` (các format khác sẽ bổ sung sau).
   - `lang` (optional, default `"en"`): ngôn ngữ OCR.
   - `parse_method` (optional, default `"auto"`): `"auto"` (tự phát hiện), `"ocr"` (ép OCR), hoặc giá trị khác (text mode).
 - **Output**:

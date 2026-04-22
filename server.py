@@ -8,7 +8,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 
 import pypdfium2 as pdfium
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from qmd.data.data_reader_writer.filebase import FileBasedDataWriter
@@ -46,12 +46,15 @@ def health():
 
 class ConvertRequest(BaseModel):
     url: str
+    format: str = "md"
     lang: str = "en"
     parse_method: str = "auto"
 
 
-@app.post("/convert")
+@app.post("/")
 def convert(req: ConvertRequest):
+    if req.format != "md":
+        raise HTTPException(status_code=400, detail=f"unsupported format: {req.format}")
     pdf_path = Path(req.url)
     if pdf_path.exists():
         pdf_bytes = pdf_path.read_bytes()
