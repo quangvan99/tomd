@@ -39,6 +39,11 @@ def load_models():
     clean_memory(get_device())
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 class ConvertRequest(BaseModel):
     url: str
     lang: str = "en"

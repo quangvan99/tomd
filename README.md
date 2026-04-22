@@ -36,6 +36,15 @@ Ví dụ:
 
 Server tự chạy sau `./start.sh` tại `http://localhost:9000`.
 
+**Health check:**
+
+```bash
+curl http://localhost:9000/health
+# {"status":"ok"}
+```
+
+**Convert:**
+
 ```bash
 curl -X POST http://localhost:9000/convert \
   -H "Content-Type: application/json" \
